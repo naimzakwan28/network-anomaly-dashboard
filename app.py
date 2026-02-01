@@ -84,17 +84,19 @@ with tab1:
         X_scaled = scaler.transform(X)
 
         # Prediction
-        if model_choice == "Random Forest":
-        y_probs = active_model.predict_proba(X_scaled)[:, 1]
+        # Prediction probabilities / confidence
+if model_choice == "Random Forest":
+    y_probs = active_model.predict_proba(X_scaled)[:, 1]
 
-        elif model_choice == "Support Vector Machine":
-        # LinearSVC has NO predict_proba
-        decision_scores = active_model.decision_function(X_scaled)
+elif model_choice == "Support Vector Machine":
+    # LinearSVC has NO predict_proba
+    decision_scores = active_model.decision_function(X_scaled)
 
-        # Normalize decision scores to 0–1 range
-        y_probs = (decision_scores - decision_scores.min()) / (
+    # Normalize decision scores to 0–1 range
+    y_probs = (decision_scores - decision_scores.min()) / (
         decision_scores.max() - decision_scores.min() + 1e-9
     )
+
 
         # -------------------------------------------------
         # KPI Metrics
@@ -313,3 +315,4 @@ if submit:
         b.metric("Confidence", f"{conf:.4f}")
 
         c.metric("Risk Level", risk)
+
