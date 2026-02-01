@@ -84,14 +84,17 @@ with tab1:
         X_scaled = scaler.transform(X)
 
         # Prediction
-        model = rf_model if model_choice == "Random Forest" else svm_model
-        y_pred = model.predict(X_scaled)
+        if model_choice == "Random Forest":
+        y_probs = active_model.predict_proba(X_scaled)[:, 1]
 
-        try:
-            y_probs = model.predict_proba(X_scaled)[:, 1]
-        except:
-            scores = model.decision_function(X_scaled)
-            y_probs = (scores - scores.min()) / (scores.max() - scores.min())
+        elif model_choice == "Support Vector Machine":
+        # LinearSVC has NO predict_proba
+        decision_scores = active_model.decision_function(X_scaled)
+
+        # Normalize decision scores to 0–1 range
+        y_probs = (decision_scores - decision_scores.min()) / (
+        decision_scores.max() - decision_scores.min() + 1e-9
+    )
 
         # -------------------------------------------------
         # KPI Metrics
@@ -308,4 +311,5 @@ if submit:
         a, b, c = st.columns(3)
         a.metric("Prediction", "Attack 🚨" if pred == 1 else "Normal ✅")
         b.metric("Confidence", f"{conf:.4f}")
+
         c.metric("Risk Level", risk)
