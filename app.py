@@ -17,10 +17,10 @@ from sklearn.metrics import (
 # -------------------------------------------------
 st.set_page_config(page_title="Network Anomaly Detection Dashboard", layout="wide")
 st.title("🚨 Advanced Network Anomaly Detection")
-st.write("Machine Learning–based Anomaly Detection using CICIDS2017")
+st.write("Advanced Anomaly Analysis using CICIDS2017 with Explainable AI")
 
 # -------------------------------------------------
-# Load Models, Scaler, Features
+# Load Models, Scaler, and Feature List
 # -------------------------------------------------
 @st.cache_resource
 def load_artifacts():
@@ -48,7 +48,7 @@ model_choice = st.sidebar.selectbox(
 top_n = st.sidebar.slider("Top features to show", 5, 30, 20)
 
 # -------------------------------------------------
-# Tabs
+# Tabs Layout
 # -------------------------------------------------
 tab1, tab2 = st.tabs([
     "📊 Dataset Analysis Dashboard",
@@ -56,11 +56,11 @@ tab1, tab2 = st.tabs([
 ])
 
 # =================================================
-# TAB 1 — DATASET ANALYSIS
+# TAB 1 — DATASET ANALYSIS DASHBOARD
 # =================================================
 with tab1:
     uploaded_file = st.file_uploader(
-        "📂 Upload CICIDS2017 CSV Dataset",
+        "📂 Upload CICIDS2017 Sample CSV Dataset",
         type=["csv"]
     )
 
@@ -74,28 +74,24 @@ with tab1:
         )
 
         # Feature alignment
-        for col in set(trained_features) - set(df.columns):
+        missing_features = set(trained_features) - set(df.columns)
+        for col in missing_features:
             df[col] = 0
 
-        X = df[trained_features].copy()
+        X = df[trained_features]
         X.replace([np.inf, -np.inf], np.nan, inplace=True)
         X.fillna(0, inplace=True)
         X_scaled = scaler.transform(X)
 
-        # Select model
-        active_model = rf_model if model_choice == "Random Forest" else svm_model
-
         # Prediction
-        y_pred = active_model.predict(X_scaled)
+        model = rf_model if model_choice == "Random Forest" else svm_model
+        y_pred = model.predict(X_scaled)
 
-        # Confidence
-        if model_choice == "Random Forest":
-            y_probs = active_model.predict_proba(X_scaled)[:, 1]
-        else:
-            decision_scores = active_model.decision_function(X_scaled)
-            y_probs = (decision_scores - decision_scores.min()) / (
-                decision_scores.max() - decision_scores.min() + 1e-9
-            )
+        try:
+            y_probs = model.predict_proba(X_scaled)[:, 1]
+        except:
+            scores = model.decision_function(X_scaled)
+            y_probs = (scores - scores.min()) / (scores.max() - scores.min())
 
         # -------------------------------------------------
         # KPI Metrics
@@ -117,6 +113,8 @@ with tab1:
         # Performance Visuals
         # -------------------------------------------------
         st.markdown("---")
+        st.subheader("🖼️ Model Performance Visuals")
+
         v1, v2 = st.columns(2)
 
         with v1:
@@ -125,8 +123,8 @@ with tab1:
             )
             report_df = pd.DataFrame(report).transpose().iloc[:2, :3]
             st.plotly_chart(
-                px.bar(report_df, barmode="group", title="Classification Metrics"),
-                width="stretch"
+                px.bar(report_df, barmode="group", title="Classification Report"),
+                use_container_width=True
             )
 
         with v2:
@@ -136,7 +134,57 @@ with tab1:
                            x=["Normal", "Attack"],
                            y=["Normal", "Attack"],
                            title="Confusion Matrix"),
-                width="stretch"
+                use_container_width=True
+            )
+
+        # -------------------------------------------------
+        # Attack Timeline
+        # -------------------------------------------------
+        if "Timestamp" in df.columns:
+            st.markdown("---")
+            st.subheader("📈 Attack Timeline")
+
+            df["Timestamp"] = pd.to_datetime(df["Timestamp"], dayfirst=True, errors="coerce")
+            temp_df = df.dropna(subset=["Timestamp"]).copy()
+
+            if not temp_df.empty:
+                temp_df["IsAttack"] = y_pred[:len(temp_df)]
+                timeline = temp_df.resample("1T", on="Timestamp")["IsAttack"].sum().reset_index()
+
+                st.plotly_chart(
+                    px.line(timeline, x="Timestamp", y="IsAttack",
+                            title="Anomalies per Minute",
+                            color_discrete_sequence=["red"]),
+                    use_container_width=True
+                )
+
+        # -------------------------------------------------
+        # Mini SOC Panel
+        # -------------------------------------------------
+        st.markdown("---")
+        l, r = st.columns(2)
+
+        with l:
+            st.subheader("📋 Detection Priority")
+            soc_df = pd.DataFrame({
+                "Source IP": df["Source IP"] if "Source IP" in df.columns else "N/A",
+                "Prediction": ["Attack" if p == 1 else "Normal" for p in y_pred],
+                "Confidence": y_probs.round(4)
+            })
+            soc_df["Risk Level"] = pd.cut(
+                soc_df["Confidence"],
+                bins=[-0.1, 0.4, 0.7, 1.1],
+                labels=["Low 🟢", "Medium 🟡", "High 🔴"]
+            )
+            st.dataframe(soc_df.head(50), use_container_width=True)
+
+        with r:
+            st.subheader("🕵️ Threat Distribution")
+            st.plotly_chart(
+                px.pie(values=df["Label"].value_counts().values,
+                       names=df["Label"].value_counts().index,
+                       hole=0.4),
+                use_container_width=True
             )
 
         # -------------------------------------------------
@@ -155,7 +203,7 @@ with tab1:
             st.pyplot(fig)
 
         # -------------------------------------------------
-        # Feature Importance
+        # Global Feature Importance
         # -------------------------------------------------
         st.markdown("---")
         st.subheader("🔍 Global Feature Importance")
@@ -167,20 +215,27 @@ with tab1:
             }).sort_values(by="Importance", ascending=False).head(top_n)
 
             st.bar_chart(fi_df.set_index("Feature"))
+
         else:
-            st.info("Feature importance for SVM shown via SHAP / weights if available.")
+            if os.path.exists("svm_feature_importance.csv"):
+                svm_df = pd.read_csv("svm_feature_importance.csv") \
+                            .sort_values(by="AbsWeight", ascending=False) \
+                            .head(top_n)
+                st.bar_chart(svm_df.set_index("Feature")["AbsWeight"])
+            else:
+                st.warning("svm_feature_importance.csv not found.")
 
     else:
-        st.info("📌 Please upload a CSV file to begin analysis.")
+        st.info("📌 Please upload a CICIDS2017 CSV file to begin analysis.")
 
 # =================================================
-# TAB 2 — MANUAL FLOW ANALYSIS
+# TAB 2 — MANUAL FLOW ANALYSIS (NO DATASET KPIs)
 # =================================================
 with tab2:
     st.subheader("🔎 Manual Flow Analysis (What-If Prediction)")
-    st.write("Manually input a single network flow to simulate detection.")
+    st.write("Manually input a single network flow to predict anomaly behavior.")
 
-    with st.form("manual_form"):
+    with st.form("manual_flow_form"):
         c1, c2, c3 = st.columns(3)
 
         with c1:
@@ -196,47 +251,58 @@ with tab2:
         with c3:
             idle_mean = st.number_input("Idle Mean", 0.0, value=0.0)
             idle_max = st.number_input("Idle Max", 0.0, value=0.0)
-            protocol = st.selectbox(
-                "Protocol", [6, 17],
-                format_func=lambda x: "TCP (6)" if x == 6 else "UDP (17)"
-            )
+            protocol = st.selectbox("Protocol", [6, 17],
+                                    format_func=lambda x: "TCP (6)" if x == 6 else "UDP (17)")
 
         submit = st.form_submit_button("🔍 Predict Flow")
 
-    if submit:
-        manual_data = {f: 0 for f in trained_features}
+if submit:
+    # -------------------------------------------------
+    # Step 1: Create base manual input
+    # -------------------------------------------------
+    manual_data = {f: 0 for f in trained_features}
 
-        manual_data.update({
-            "Flow Duration": flow_duration,
-            "Packet Length Mean": pkt_len_mean,
-            "Packet Length Variance": pkt_len_var,
-            "Flow IAT Mean": flow_iat_mean,
-            "Flow IAT Max": flow_iat_max,
-            "Fwd Packet Length Max": fwd_pkt_len_max,
-            "Idle Mean": idle_mean,
-            "Idle Max": idle_max,
-            "Protocol": protocol
-        })
+    manual_data.update({
+        "Flow Duration": flow_duration,
+        "Packet Length Mean": pkt_len_mean,
+        "Packet Length Variance": pkt_len_var,
+        "Flow IAT Mean": flow_iat_mean,
+        "Flow IAT Max": flow_iat_max,
+        "Fwd Packet Length Max": fwd_pkt_len_max,
+        "Idle Mean": idle_mean,
+        "Idle Max": idle_max,
+        "Protocol": protocol
+    })
 
-        if "Flow Bytes/s" in trained_features:
-            manual_data["Flow Bytes/s"] = pkt_len_mean * 1000
+    # -------------------------------------------------
+    # Step 2: Derived Flood / Attack-like Features
+    # -------------------------------------------------
+    if "Flow Bytes/s" in trained_features:
+        manual_data["Flow Bytes/s"] = pkt_len_mean * 1000
 
-        if "Flow Packets/s" in trained_features:
-            manual_data["Flow Packets/s"] = 2000
+    if "Flow Packets/s" in trained_features:
+        manual_data["Flow Packets/s"] = 2000
 
+    if "Total Fwd Packets" in trained_features:
+        manual_data["Total Fwd Packets"] = 500
+
+    if "Total Backward Packets" in trained_features:
+        manual_data["Total Backward Packets"] = 0
+
+        
         manual_df = pd.DataFrame([manual_data])[trained_features]
         manual_scaled = scaler.transform(manual_df)
 
         model = rf_model if model_choice == "Random Forest" else svm_model
         pred = model.predict(manual_scaled)[0]
 
-        if model_choice == "Random Forest":
+        try:
             conf = model.predict_proba(manual_scaled)[0][1]
-        else:
+        except:
             score = model.decision_function(manual_scaled)[0]
-            conf = 1 / (1 + np.exp(-score))
+            conf = (score - score.min()) / (score.max() - score.min())
 
-        risk = "Low 🟢" if conf < 0.3 else "Medium 🟡" if conf < 0.6 else "High 🔴"
+        risk = "Low 🟢" if conf < 0.2 else "Medium 🟡" if conf < 0.5 else "High 🔴"
 
         st.markdown("### 🧾 Prediction Result")
         a, b, c = st.columns(3)
