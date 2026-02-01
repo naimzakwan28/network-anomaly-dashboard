@@ -85,15 +85,14 @@ with tab1:
 
         # Prediction
         # Prediction probabilities / confidence
-if model_choice == "Random Forest":
-    y_probs = active_model.predict_proba(X_scaled)[:, 1]
+    if model_choice == "Random Forest":
+        y_probs = active_model.predict_proba(X_scaled)[:, 1]
 
-elif model_choice == "Support Vector Machine":
-    # LinearSVC has NO predict_proba
-    decision_scores = active_model.decision_function(X_scaled)
-
-    # Normalize decision scores to 0–1 range
-    y_probs = (decision_scores - decision_scores.min()) / (
+    elif model_choice == "Support Vector Machine":
+        # LinearSVC has NO predict_proba
+        decision_scores = active_model.decision_function(X_scaled)
+        # Normalize decision scores to 0–1 range
+        y_probs = (decision_scores - decision_scores.min()) / (
         decision_scores.max() - decision_scores.min() + 1e-9
     )
 
@@ -315,4 +314,5 @@ if submit:
         b.metric("Confidence", f"{conf:.4f}")
 
         c.metric("Risk Level", risk)
+
 
